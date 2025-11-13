@@ -10,15 +10,15 @@ public class NotaDTO {
     private String nombreCompetencia;
     private int idDocente;
     private String nombreDocente;
-    private Double calificacion;
+    private String calificacion; // ⬅️ Cambiado a String
     private String periodo;
     private Integer anio;
     private LocalDate fechaRegistro;
     private String observacion;
     private Boolean enabled;
-    private String estadoAcademico; // "En Riesgo", "Regular", "Satisfactorio", "Destacado"
+    private String estadoAcademico;
 
-    // Constructor vacío
+    // Constructores
     public NotaDTO() {}
 
     // Getters y Setters completos
@@ -78,11 +78,11 @@ public class NotaDTO {
         this.nombreDocente = nombreDocente;
     }
 
-    public Double getCalificacion() {
+    public String getCalificacion() {
         return calificacion;
     }
 
-    public void setCalificacion(Double calificacion) {
+    public void setCalificacion(String calificacion) {
         this.calificacion = calificacion;
     }
 

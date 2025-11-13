@@ -23,11 +23,12 @@ public class Nota {
     @JoinColumn(name = "idDocente", nullable = false)
     private User docente;
 
-    @Column(name = "calificacion", nullable = false)
-    private Double calificacion;
+    // ⬇️ CAMBIO PRINCIPAL: De Double a String
+    @Column(name = "calificacion", length = 2, nullable = false)
+    private String calificacion; // "AD", "A", "B", "C"
 
     @Column(name = "periodo", length = 20, nullable = false)
-    private String periodo; // "Bimestre 1", "Trimestre 2", etc.
+    private String periodo;
 
     @Column(name = "anio", nullable = false)
     private Integer anio;
@@ -48,7 +49,7 @@ public class Nota {
     }
 
     public Nota(int idNota, Estudiante estudiante, Competencia competencia, User docente,
-                Double calificacion, String periodo, Integer anio, LocalDate fechaRegistro,
+                String calificacion, String periodo, Integer anio, LocalDate fechaRegistro,
                 String observacion, Boolean enabled) {
         this.idNota = idNota;
         this.estudiante = estudiante;
@@ -95,11 +96,11 @@ public class Nota {
         this.docente = docente;
     }
 
-    public Double getCalificacion() {
+    public String getCalificacion() {
         return calificacion;
     }
 
-    public void setCalificacion(Double calificacion) {
+    public void setCalificacion(String calificacion) {
         this.calificacion = calificacion;
     }
 

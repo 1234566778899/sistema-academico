@@ -7,6 +7,8 @@ import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -26,13 +28,19 @@ public class NotaController {
     public ResponseEntity<Map<String, String>> registrar(@RequestBody NotaDTO dto) {
         Map<String, String> response = new HashMap<>();
         try {
+            // Validar que la calificación sea válida
+            if (!esCalificacionValida(dto.getCalificacion())) {
+                response.put("message", "Calificación inválida. Use: AD, A, B o C");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            }
+
             ModelMapper m = new ModelMapper();
             Nota nota = m.map(dto, Nota.class);
             nS.insert(nota);
             response.put("message", "Nota registrada exitosamente");
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            response.put("message", "Error al registrar nota");
+            response.put("message", "Error al registrar nota: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
         }
     }
@@ -42,7 +50,6 @@ public class NotaController {
         return nS.list().stream().map(x -> {
             ModelMapper m = new ModelMapper();
             NotaDTO dto = m.map(x, NotaDTO.class);
-            // Agregar información adicional
             dto.setNombreEstudiante(x.getEstudiante().getNombres() + " " + x.getEstudiante().getApellidos());
             dto.setNombreCompetencia(x.getCompetencia().getNombreCompetencia());
             dto.setNombreDocente(x.getDocente().getNombres() + " " + x.getDocente().getApellidos());
@@ -68,6 +75,11 @@ public class NotaController {
     public ResponseEntity<Map<String, String>> modificar(@RequestBody NotaDTO dto) {
         Map<String, String> response = new HashMap<>();
         try {
+            if (!esCalificacionValida(dto.getCalificacion())) {
+                response.put("message", "Calificación inválida. Use: AD, A, B o C");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            }
+
             ModelMapper m = new ModelMapper();
             Nota nota = m.map(dto, Nota.class);
             nS.update(nota);
@@ -90,8 +102,6 @@ public class NotaController {
         return dto;
     }
 
-    // Endpoints específicos para reportes (mantener igual)
-
     @GetMapping("/estudiante/{idEstudiante}")
     public List<NotaDTO> listarPorEstudiante(@PathVariable("idEstudiante") int idEstudiante) {
         return nS.findByEstudiante(idEstudiante).stream().map(x -> {
@@ -101,6 +111,15 @@ public class NotaController {
             dto.setEstadoAcademico(calcularEstadoAcademico(x.getCalificacion()));
             return dto;
         }).collect(Collectors.toList());
+    }
+
+    // ⬇️ NUEVO: Endpoint para riesgo académico (≥2 competencias con C)
+    @GetMapping("/riesgo/academico/{periodo}/{anio}")
+    public ResponseEntity<List<Map<String, Object>>> listarEstudiantesRiesgoAcademico(
+            @PathVariable("periodo") String periodo,
+            @PathVariable("anio") Integer anio) {
+        List<Map<String, Object>> estudiantes = nS.findEstudiantesConRiesgoAcademico(periodo, anio);
+        return ResponseEntity.ok(estudiantes);
     }
 
     @GetMapping("/riesgo/{periodo}/{anio}")
@@ -114,16 +133,6 @@ public class NotaController {
             dto.setEstadoAcademico("En Riesgo");
             return dto;
         }).collect(Collectors.toList());
-    }
-
-    @GetMapping("/promedio/{idEstudiante}/{periodo}/{anio}")
-    public ResponseEntity<Map<String, Double>> obtenerPromedio(@PathVariable("idEstudiante") int idEstudiante,
-                                                               @PathVariable("periodo") String periodo,
-                                                               @PathVariable("anio") Integer anio) {
-        Map<String, Double> response = new HashMap<>();
-        Double promedio = nS.findPromedioEstudiante(idEstudiante, periodo, anio);
-        response.put("promedio", promedio != null ? promedio : 0.0);
-        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/grado/{grado}/seccion/{seccion}/periodo/{periodo}/anio/{anio}")
@@ -152,35 +161,88 @@ public class NotaController {
         }).collect(Collectors.toList());
     }
 
-    @GetMapping("/competencia/{idCompetencia}/grado/{grado}/periodo/{periodo}/anio/{anio}")
-    public List<NotaDTO> listarPorCompetenciaGrado(@PathVariable("idCompetencia") int idCompetencia,
-                                                   @PathVariable("grado") String grado,
-                                                   @PathVariable("periodo") String periodo,
-                                                   @PathVariable("anio") Integer anio) {
-        return nS.findByCompetenciaGradoPeriodo(idCompetencia, grado, periodo, anio).stream().map(x -> {
-            ModelMapper m = new ModelMapper();
-            NotaDTO dto = m.map(x, NotaDTO.class);
-            dto.setNombreEstudiante(x.getEstudiante().getNombres() + " " + x.getEstudiante().getApellidos());
-            dto.setEstadoAcademico(calcularEstadoAcademico(x.getCalificacion()));
-            return dto;
-        }).collect(Collectors.toList());
+    // ========== NUEVOS ENDPOINTS PARA DOCENTES (HU-13, 15, 16, 17) ==========
+
+    // ⬇️ HU-15: Filtrar notas por curso, competencia y sección del docente
+    @GetMapping("/docente/{idDocente}/curso/{idCurso}/competencia/{idCompetencia}/seccion/{seccion}/periodo/{periodo}/anio/{anio}")
+    public List<NotaDTO> listarPorDocenteCompetenciaSeccion(
+            @PathVariable("idDocente") int idDocente,
+            @PathVariable("idCurso") int idCurso,
+            @PathVariable("idCompetencia") int idCompetencia,
+            @PathVariable("seccion") String seccion,
+            @PathVariable("periodo") String periodo,
+            @PathVariable("anio") Integer anio) {
+
+        return nS.findByDocenteCompetenciaSeccionPeriodo(idDocente, idCompetencia, seccion, periodo, anio)
+                .stream().map(x -> {
+                    ModelMapper m = new ModelMapper();
+                    NotaDTO dto = m.map(x, NotaDTO.class);
+                    dto.setNombreEstudiante(x.getEstudiante().getNombres() + " " + x.getEstudiante().getApellidos());
+                    dto.setNombreCompetencia(x.getCompetencia().getNombreCompetencia());
+                    dto.setEstadoAcademico(calcularEstadoAcademico(x.getCalificacion()));
+                    return dto;
+                }).collect(Collectors.toList());
     }
 
-    @GetMapping("/riesgo/count/{grado}/{periodo}/{anio}")
-    public ResponseEntity<Map<String, Long>> contarEstudiantesEnRiesgo(@PathVariable("grado") String grado,
-                                                                       @PathVariable("periodo") String periodo,
-                                                                       @PathVariable("anio") Integer anio) {
-        Map<String, Long> response = new HashMap<>();
-        Long count = nS.countEstudiantesEnRiesgoByGrado(grado, periodo, anio);
-        response.put("count", count);
-        return ResponseEntity.ok(response);
+    // ⬇️ HU-16: Distribución de calificaciones para gráfico
+    @GetMapping("/docente/{idDocente}/distribucion/competencia/{idCompetencia}/seccion/{seccion}/periodo/{periodo}/anio/{anio}")
+    public ResponseEntity<Map<String, Integer>> obtenerDistribucionCalificaciones(
+            @PathVariable("idDocente") int idDocente,
+            @PathVariable("idCompetencia") int idCompetencia,
+            @PathVariable("seccion") String seccion,
+            @PathVariable("periodo") String periodo,
+            @PathVariable("anio") Integer anio) {
+
+        Map<String, Integer> distribucion = nS.findDistribucionCalificaciones(
+                idDocente, idCompetencia, seccion, periodo, anio);
+        return ResponseEntity.ok(distribucion);
     }
 
-    // Método auxiliar para calcular estado académico
-    private String calcularEstadoAcademico(Double calificacion) {
-        if (calificacion < 11) return "En Riesgo";
-        if (calificacion < 14) return "Regular";
-        if (calificacion < 17) return "Satisfactorio";
-        return "Destacado";
+    // ⬇️ HU-17: Competencias con mayor riesgo
+    @GetMapping("/docente/{idDocente}/competencias-riesgo/curso/{idCurso}/seccion/{seccion}/periodo/{periodo}/anio/{anio}")
+    public ResponseEntity<List<Map<String, Object>>> obtenerCompetenciasConRiesgo(
+            @PathVariable("idDocente") int idDocente,
+            @PathVariable("idCurso") int idCurso,
+            @PathVariable("seccion") String seccion,
+            @PathVariable("periodo") String periodo,
+            @PathVariable("anio") Integer anio) {
+
+        List<Map<String, Object>> competencias = nS.findCompetenciasConMayorRiesgo(
+                idDocente, idCurso, seccion, periodo, anio);
+        return ResponseEntity.ok(competencias);
+    }
+
+    // ⬇️ HU-13: Evolución de estudiante por competencia específica
+    @GetMapping("/evolucion/estudiante/{idEstudiante}/competencia/{idCompetencia}")
+    public List<NotaDTO> obtenerEvolucionPorCompetencia(
+            @PathVariable("idEstudiante") int idEstudiante,
+            @PathVariable("idCompetencia") int idCompetencia) {
+
+        return nS.findEvolucionEstudiantePorCompetencia(idEstudiante, idCompetencia)
+                .stream().map(x -> {
+                    ModelMapper m = new ModelMapper();
+                    NotaDTO dto = m.map(x, NotaDTO.class);
+                    dto.setNombreCompetencia(x.getCompetencia().getNombreCompetencia());
+                    dto.setEstadoAcademico(calcularEstadoAcademico(x.getCalificacion()));
+                    return dto;
+                }).collect(Collectors.toList());
+    }
+
+    // ⬇️ Método auxiliar para validar calificaciones
+    private boolean esCalificacionValida(String calificacion) {
+        return calificacion != null &&
+                (calificacion.equals("AD") || calificacion.equals("A") ||
+                        calificacion.equals("B") || calificacion.equals("C"));
+    }
+
+    // ⬇️ ACTUALIZADO: Método para calcular estado académico con letras
+    private String calcularEstadoAcademico(String calificacion) {
+        switch (calificacion) {
+            case "AD": return "Logro Destacado";
+            case "A": return "Logro Esperado";
+            case "B": return "En Proceso";
+            case "C": return "En Inicio";
+            default: return "Sin Calificación";
+        }
     }
 }
